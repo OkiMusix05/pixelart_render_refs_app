@@ -6,6 +6,9 @@ use std::io::{Write, Read};
 use std::path::Path;
 use egui::load::SizedTexture;
 
+mod icons;
+use icons::*;
+
 type ColorMatrix = Vec<Vec<Option<Color32>>>;
 type RefMatrix = Vec<Vec<Option<(usize, usize)>>>;
 
@@ -23,6 +26,9 @@ pub struct TemplateApp {
     ref_matrix: Vec<RefMatrix>,
 
     //$ Helper data
+    /*//# Icons
+    #[serde(skip)]
+    icons: Icon,*/
     //# Drag from canvas to ref mechanic
     #[serde(skip)]
     start_drag: Option<Pos2>,
@@ -111,6 +117,8 @@ impl eframe::App for TemplateApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // Put your widgets into a `SidePanel`, `TopBottomPanel`, `CentralPanel`, `Window` or `Area`.
         // For inspiration and more examples, go to https://emilk.github.io/egui
+        #[allow(non_snake_case)]
+        let ICON:Icon = load_icons(ctx);
 
         egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
             // The top panel is often a good place for a menu bar:
@@ -365,10 +373,17 @@ impl eframe::App for TemplateApp {
                             self.drag_where = 2;
                         } else if ui.input(|i| i.modifiers.ctrl)
                             || ui.input(|i| i.modifiers.mac_cmd) { // Reorder
-                            /*if let Some(start) = self.start_drag {
+                            if let Some(start) = self.start_drag {
                                 let (xc, yc) = ((start.x - 16.) as usize /16, (start.y - 32.) as usize / 16);
-                                self.ref_matrix[self.current_frame][xc][yc] = None;
-                            }*/
+                                //self.ref_matrix[self.current_frame][xc][yc] = None;
+                                // cover up so it looks like it is actually being dragged, not copied
+                                // this has a little visual bug but for the most part it's fine
+                                painter.rect_filled(
+                                    Rect::from_min_size(Pos2::new((xc + 1) as f32 * 16., (yc + 2) as f32 * 16.), vec2(square_size as f32, square_size as f32)),
+                                    0.0,
+                                    get_checkerboard(xc, yc),
+                                );
+                            }
                             if let Some(color) = self.drag_color {
                                 painter.rect_filled(
                                     egui::Rect::from_min_size(self.end_drag.unwrap() - egui::vec2(8., 8.), egui::vec2(square_size as f32, square_size as f32)),
@@ -396,7 +411,9 @@ impl eframe::App for TemplateApp {
                             }
                             if let Some(start_drag) = self.start_drag {
                                 let (xs, ys) = ((start_drag.x - 16.) as usize / 16, (start_drag.y - 32.) as usize / 16);
-                                self.ref_matrix[self.current_frame][xs][ys] = None;
+                                if xc < 16 && yc < 16 {
+                                    self.ref_matrix[self.current_frame][xs][ys] = None;
+                                }
                             }
                         }
                     }
@@ -485,14 +502,15 @@ impl eframe::App for TemplateApp {
             }
 
             //$ Play animation
-            if let Some(texture) = load_png_as_texture(ctx, "assets/icons/icon_play.png") {
-                let button_size = Vec2::new(32.0, 32.0); // Button size
-                let image_size = Vec2::new(32.0, 32.0); // Image size
+                //? Fix button size (optional)
+            let button_size = Vec2::new(32.0, 32.0); // Button size (specified by icon size, not independent)
+            const ICON_BUTTON_SIZE:Vec2 = Vec2::new(24.0, 24.0); // Image size
 
-                // Check if the button was clicked
-                if ui_with_image_button(ui, &texture, Vec2::new(560., 32.), button_size, image_size) {
-                    println!("Button clicked!");
-                }
+            if ui_with_image_button(ui, if !self.is_animating {&ICON.play} else {&ICON.pause}, Vec2::new(560., 32.), button_size, ICON_BUTTON_SIZE) {
+                if self.is_animating {
+                    self.is_animating = false
+                } else {self.is_animating = true} // switch
+                println!("Play/Pause button pressed");
             }
 
         });
@@ -504,6 +522,7 @@ impl eframe::App for TemplateApp {
     }
 }
 
+// Transparent png checkerboard using LIGHTGRAY and GRAY
 fn get_checkerboard(x:usize, y:usize) -> Color32 {
     if (x+y)%2 == 0 {
         Color32::LIGHT_GRAY
@@ -559,19 +578,6 @@ fn transpose<T: Clone>(matrix: Vec<Vec<T>>) -> Vec<Vec<T>> {
                 .collect()
         })
         .collect()
-}
-
-fn load_png_as_texture(ctx: &Context, path: &str) -> Option<egui::TextureHandle> {
-    // Load the image using the `image` crate
-    let img = image::open(path).ok()?.to_rgba8();
-    let (width, height) = img.dimensions();
-    let color_image = egui::ColorImage::from_rgba_unmultiplied(
-        [width as usize, height as usize],
-        img.as_raw(),
-    );
-
-    // Upload the image as a texture in `egui`
-    Some(ctx.load_texture("png_texture", color_image, TextureOptions::LINEAR))
 }
 
 fn ui_with_image_button(
