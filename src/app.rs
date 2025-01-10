@@ -1,9 +1,10 @@
-use egui::{Color32, Pos2, Context, Key, TextStyle, FontId};
+use egui::{Color32, Pos2, Context, Key, TextStyle, FontId, Painter, Vec2, Rect, TextureOptions, vec2};
 use image::{self, Rgba, RgbaImage};
 use tinyfiledialogs::{MessageBoxIcon, OkCancel};
 use std::fs::{File, read};
 use std::io::{Write, Read};
 use std::path::Path;
+use egui::load::SizedTexture;
 
 type ColorMatrix = Vec<Vec<Option<Color32>>>;
 type RefMatrix = Vec<Vec<Option<(usize, usize)>>>;
@@ -35,8 +36,13 @@ pub struct TemplateApp {
     drag_ref: Option<(usize, usize)>,
     #[serde(skip)]
     drag_where: u8,
+    //# Frame and animations mechanism
     #[serde(skip)]
     current_frame: usize,
+    #[serde(skip)]
+    is_animating: bool,
+    #[serde(skip)]
+    last_update: std::time::Instant,
 }
 
 #[derive(serde::Deserialize, serde::Serialize)]
@@ -75,6 +81,8 @@ impl Default for TemplateApp {
             drag_ref: None,
             current_frame: 0,
             drag_where: 2, // 2 is none
+            is_animating: false,
+            last_update: std::time::Instant::now(),
         }
     }
 }
@@ -357,6 +365,10 @@ impl eframe::App for TemplateApp {
                             self.drag_where = 2;
                         } else if ui.input(|i| i.modifiers.ctrl)
                             || ui.input(|i| i.modifiers.mac_cmd) { // Reorder
+                            /*if let Some(start) = self.start_drag {
+                                let (xc, yc) = ((start.x - 16.) as usize /16, (start.y - 32.) as usize / 16);
+                                self.ref_matrix[self.current_frame][xc][yc] = None;
+                            }*/
                             if let Some(color) = self.drag_color {
                                 painter.rect_filled(
                                     egui::Rect::from_min_size(self.end_drag.unwrap() - egui::vec2(8., 8.), egui::vec2(square_size as f32, square_size as f32)),
@@ -366,8 +378,10 @@ impl eframe::App for TemplateApp {
                             }
                             self.drag_where = 0;
                         } else { // Copy from right
-                            self.ref_matrix[self.current_frame][xc][yc] = Some((xc, yc));
-                            self.drag_where = 2;
+                            //? Turned off this feature temporarily, as I feel it can lead to user-errors
+                            //? will turn back on when I implement ctrl-z
+                            //self.ref_matrix[self.current_frame][xc][yc] = Some((xc, yc));
+                            //self.drag_where = 2;
                         }
                     }
                 }
@@ -469,6 +483,18 @@ impl eframe::App for TemplateApp {
                 self.ref_matrix.push(vec![vec![None; 16]; 16]);
                 self.current_frame = frames_len;
             }
+
+            //$ Play animation
+            if let Some(texture) = load_png_as_texture(ctx, "assets/icons/icon_play.png") {
+                let button_size = Vec2::new(32.0, 32.0); // Button size
+                let image_size = Vec2::new(32.0, 32.0); // Image size
+
+                // Check if the button was clicked
+                if ui_with_image_button(ui, &texture, Vec2::new(560., 32.), button_size, image_size) {
+                    println!("Button clicked!");
+                }
+            }
+
         });
     }
 
@@ -533,4 +559,37 @@ fn transpose<T: Clone>(matrix: Vec<Vec<T>>) -> Vec<Vec<T>> {
                 .collect()
         })
         .collect()
+}
+
+fn load_png_as_texture(ctx: &Context, path: &str) -> Option<egui::TextureHandle> {
+    // Load the image using the `image` crate
+    let img = image::open(path).ok()?.to_rgba8();
+    let (width, height) = img.dimensions();
+    let color_image = egui::ColorImage::from_rgba_unmultiplied(
+        [width as usize, height as usize],
+        img.as_raw(),
+    );
+
+    // Upload the image as a texture in `egui`
+    Some(ctx.load_texture("png_texture", color_image, TextureOptions::LINEAR))
+}
+
+fn ui_with_image_button(
+    ui: &mut egui::Ui,
+    texture: &egui::TextureHandle,
+    position: Vec2,
+    button_size: Vec2,
+    image_size: Vec2,
+) -> bool {
+    // Define the button's rectangle
+    let rect = Rect::from_min_size(position.to_pos2(), button_size);
+    //ui.painter().rect_filled(rect, egui::Rounding::ZERO, Color32::WHITE);
+
+    // Create an ImageButton with the image texture
+    let mut sized_texture = SizedTexture::from_handle(texture);
+    sized_texture.size = image_size;
+    let image_button = egui::ImageButton::new(sized_texture);
+
+    // Render the button at the specified position and return if it was clicked
+    ui.put(rect, image_button).clicked()
 }
