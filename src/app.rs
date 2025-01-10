@@ -34,6 +34,8 @@ pub struct TemplateApp {
     #[serde(skip)]
     drag_ref: Option<(usize, usize)>,
     #[serde(skip)]
+    drag_where: u8,
+    #[serde(skip)]
     current_frame: usize,
 }
 
@@ -72,6 +74,7 @@ impl Default for TemplateApp {
             drag_color: None,
             drag_ref: None,
             current_frame: 0,
+            drag_where: 2, // 2 is none
         }
     }
 }
@@ -276,14 +279,17 @@ impl eframe::App for TemplateApp {
                     self.end_drag = ctx.input(|i| i.pointer.latest_pos())
                 } else {
                     self.is_dragging = false;
+                    self.drag_where = 2;
                 }
             } else {
                 self.is_dragging = false;
+                self.drag_where = 2;
             }
             //println!("{:?}, {:?} -- {}", self.start_drag, self.end_drag, self.is_dragging);
             if let Some(start_drag) = self.start_drag {
-                //# Work on dragging in the left
+                //# Dragging on the right
                 if start_drag.x > 32. + 16.*square_size as f32{
+                    self.drag_where = 1;
                     let mut start_pos:Pos2 = start_drag;
                     start_pos.x -= 32. + 16.*square_size as f32;
                     start_pos.y -= 32.;
@@ -294,10 +300,25 @@ impl eframe::App for TemplateApp {
                     if start_ints.0 < 16 && start_ints.1 < 16 {
                         self.drag_color = self.color_matrix[start_ints.0][start_ints.1];
                     }
-                } else { self.drag_color = None; }
-            } else { self.drag_color = None; }
+                } else { //# Dragging on the left
+                    //self.drag_color = None;
+                    self.drag_where = 0;
+                    let mut start_pos:Pos2 = start_drag;
+                    start_pos.x -= 16.;
+                    start_pos.y -= 32.;
+                    let mut start_ints:(usize, usize) = (start_pos.x as usize, start_pos.y as usize);
+                    start_ints.0 = start_ints.0/16;
+                    start_ints.1 = start_ints.1/16;
+                    self.drag_ref = Some((start_ints.0, start_ints.1));
+                    if start_ints.0 < 16 && start_ints.1 < 16 {
+                        if let Some(ref_indices) = self.ref_matrix[self.current_frame][start_ints.0][start_ints.1] {
+                            self.drag_color = self.color_matrix[ref_indices.0][ref_indices.1];
+                        }
+                    }
+                }
+            } else { self.drag_color = None; self.drag_where = 2; }
 
-            if self.is_dragging == true {
+            if self.is_dragging == true && self.drag_where == 1{
                 if let Some(color) = self.drag_color {
                     painter.rect_filled(
                         egui::Rect::from_min_size(self.end_drag.unwrap() - egui::vec2(8., 8.), egui::vec2(square_size as f32, square_size as f32)),
@@ -305,7 +326,7 @@ impl eframe::App for TemplateApp {
                         color,
                     );
                 }
-            } else {
+            } else if self.drag_where == 1 && self.is_dragging == false {
                 if let Some(end_drag) = self.end_drag {
                     if let Some(drag_ref) = self.drag_ref {
                         let mut start_pos:Pos2 = end_drag;
@@ -321,14 +342,62 @@ impl eframe::App for TemplateApp {
                         self.end_drag = None;
                         self.drag_color = None;
                         self.drag_ref = None;
+                        self.drag_where = 2;
                     }
                 }
+            }
+            if self.is_dragging == true && self.drag_where == 0 {
+                if let Some(mut latest) = self.end_drag {
+                    latest.x -= 16.;
+                    latest.y -= 32.;
+                    let (xc, yc) = (latest.x as usize / 16, latest.y as usize / 16);
+                    if xc < 16 && yc < 16 {
+                        if ui.input(|i| i.modifiers.shift) { // Mass delete
+                            self.ref_matrix[self.current_frame][xc][yc] = None;
+                            self.drag_where = 2;
+                        } else if ui.input(|i| i.modifiers.ctrl)
+                            || ui.input(|i| i.modifiers.mac_cmd) { // Reorder
+                            if let Some(color) = self.drag_color {
+                                painter.rect_filled(
+                                    egui::Rect::from_min_size(self.end_drag.unwrap() - egui::vec2(8., 8.), egui::vec2(square_size as f32, square_size as f32)),
+                                    0.0,
+                                    color,
+                                );
+                            }
+                            self.drag_where = 0;
+                        } else { // Copy from right
+                            self.ref_matrix[self.current_frame][xc][yc] = Some((xc, yc));
+                            self.drag_where = 2;
+                        }
+                    }
+                }
+            } else if self.drag_where == 0 && self.is_dragging == false {
+                if ui.input(|i| i.modifiers.ctrl)
+                    || ui.input(|i| i.modifiers.mac_cmd) {
+                    if let Some(end_drag) = self.end_drag {
+                        if let Some(drag_ref) = self.drag_ref {
+                            let (xc, yc) = ((end_drag.x - 16.) as usize / 16, (end_drag.y - 32.) as usize / 16);
+                            if xc < 16 && yc < 16 {
+                                self.ref_matrix[self.current_frame][xc][yc] = self.ref_matrix[self.current_frame][drag_ref.0][drag_ref.1];
+                            }
+                            if let Some(start_drag) = self.start_drag {
+                                let (xs, ys) = ((start_drag.x - 16.) as usize / 16, (start_drag.y - 32.) as usize / 16);
+                                self.ref_matrix[self.current_frame][xs][ys] = None;
+                            }
+                        }
+                    }
+                }
+                self.start_drag = None;
+                self.end_drag = None;
+                self.drag_color = None;
+                self.drag_ref = None;
+                self.drag_where = 2;
             }
             // Eraser Left
             if ctx.input(|i| i.pointer.any_pressed() && i.modifiers.shift) {
                 if let Some(pos) = ctx.input(|i| i.pointer.latest_pos()) {
                     if pos.x < (16 + 16*16) as f32 {
-                        let coords = ((pos.x as usize - 16) / 16, (pos.y as usize - 32) / 16);
+                        let coords = ((pos.x  - 16.) as usize / 16, (pos.y - 32.) as usize / 16);
                         if coords.0 < 16 && coords.1 < 16 {
                             self.ref_matrix[self.current_frame][coords.0][coords.1] = None;
                         }
