@@ -44,11 +44,15 @@ pub struct TemplateApp {
     drag_where: u8,
     //# Frame and animations mechanism
     #[serde(skip)]
+    refresh_rate_fps: u64,
+    #[serde(skip)]
     current_frame: usize,
     #[serde(skip)]
     is_animating: bool,
     #[serde(skip)]
     last_update: std::time::Instant,
+    #[serde(skip)]
+    accumulated_time: std::time::Duration,
 }
 
 #[derive(serde::Deserialize, serde::Serialize)]
@@ -86,9 +90,11 @@ impl Default for TemplateApp {
             drag_color: None,
             drag_ref: None,
             current_frame: 0,
+            refresh_rate_fps: 1000/5, // 1000/fps : default 5 fps
             drag_where: 2, // 2 is none
             is_animating: false,
             last_update: std::time::Instant::now(),
+            accumulated_time: std::time::Duration::from_millis(0),
         }
     }
 }
@@ -502,6 +508,23 @@ impl eframe::App for TemplateApp {
             }
 
             //$ Play animation
+            if self.is_animating {
+                let now = std::time::Instant::now();
+                let elapsed = now.duration_since(self.last_update);
+                self.accumulated_time += elapsed;
+
+                while self.accumulated_time.as_millis() >= self.refresh_rate_fps as u128 {
+                    if self.current_frame == frames_len - 1 {
+                        self.current_frame = 0;
+                    } else {
+                        self.current_frame += 1;
+                    }
+                    self.accumulated_time -= std::time::Duration::from_millis(self.refresh_rate_fps);
+                }
+
+                self.last_update = now;
+                ctx.request_repaint();
+            }
                 //? Fix button size (optional)
             let button_size = Vec2::new(32.0, 32.0); // Button size (specified by icon size, not independent)
             const ICON_BUTTON_SIZE:Vec2 = Vec2::new(24.0, 24.0); // Image size
